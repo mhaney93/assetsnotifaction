@@ -13,6 +13,7 @@ spamming a notification every time -- only on an actual change of leader.
 
 import json
 import sys
+import time
 from pathlib import Path
 
 import requests
@@ -94,18 +95,29 @@ def get_top_stock():
 
 
 def get_top_crypto():
-    resp = requests.get(
-        "https://api.coingecko.com/api/v3/coins/markets",
-        params={
-            "vs_currency": "usd",
-            "order": "market_cap_desc",
-            "per_page": 1,
-            "page": 1,
-        },
-        timeout=15,
-    )
-    resp.raise_for_status()
-    top = resp.json()[0]
+    last_err = None
+    for attempt in range(3):
+        resp = requests.get(
+            "https://api.coingecko.com/api/v3/coins/markets",
+            params={
+                "vs_currency": "usd",
+                "order": "market_cap_desc",
+                "per_page": 1,
+                "page": 1,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data:
+            top = data[0]
+            break
+        last_err = f"empty response body: {resp.text[:200]!r}"
+        print(f"  warn: coingecko returned no data (attempt {attempt + 1}/3): {last_err}", file=sys.stderr)
+        time.sleep(5)
+    else:
+        raise RuntimeError(f"coingecko returned no data after retries: {last_err}")
+
     return {
         "class": "crypto",
         "leader": top["symbol"].upper(),
