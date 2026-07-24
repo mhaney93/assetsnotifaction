@@ -96,7 +96,8 @@ def get_top_stock():
 
 def get_top_crypto():
     last_err = None
-    for attempt in range(3):
+    attempts = 6
+    for attempt in range(attempts):
         resp = requests.get(
             "https://api.coingecko.com/api/v3/coins/markets",
             params={
@@ -113,8 +114,8 @@ def get_top_crypto():
             top = data[0]
             break
         last_err = f"empty response body: {resp.text[:200]!r}"
-        print(f"  warn: coingecko returned no data (attempt {attempt + 1}/3): {last_err}", file=sys.stderr)
-        time.sleep(5)
+        print(f"  warn: coingecko returned no data (attempt {attempt + 1}/{attempts}): {last_err}", file=sys.stderr)
+        time.sleep(10 * (attempt + 1))
     else:
         raise RuntimeError(f"coingecko returned no data after retries: {last_err}")
 
