@@ -1,6 +1,5 @@
 """
-Watches for a change in "who's #1" across three asset classes:
-  - largest publicly traded company (by market cap)
+Watches for a change in "who's #1" across two asset classes:
   - largest cryptocurrency (by market cap)
   - largest precious metal (by total mined value: spot price x cumulative
     mined supply, since metals don't have a market cap in the usual sense)
@@ -18,18 +17,11 @@ from pathlib import Path
 
 import requests
 import yfinance as yf
-from yfinance import EquityQuery
 
 NTFY_TOPIC = "mh-marketcap-8f3k2"
 NTFY_URL = f"https://ntfy.sh/{NTFY_TOPIC}"
 
 STATE_PATH = Path(__file__).parent / "state.json"
-
-# Non-US-listed giants that Yahoo's "region=us" screener won't surface but
-# that could plausibly be the global #1 (e.g. Saudi Aramco). The rest of the
-# candidate list is discovered live from Yahoo's screener, no maintenance
-# needed.
-EXTRA_NON_US_TICKERS = ["2222.SR"]
 
 # Cumulative mined supply, in metric tonnes (rough public estimates).
 # These change slowly -- update occasionally, no need for a live feed.
@@ -48,50 +40,6 @@ METAL_FUTURES_TICKERS = {
     "Platinum": "PL=F",
     "Palladium": "PA=F",
 }
-
-
-_fx_cache = {}
-
-
-def _fx_to_usd(currency):
-    """Return the multiplier to convert an amount in `currency` to USD."""
-    if currency == "USD":
-        return 1.0
-    if currency in _fx_cache:
-        return _fx_cache[currency]
-    rate = yf.Ticker(f"{currency}USD=X").fast_info["last_price"]
-    _fx_cache[currency] = rate
-    return rate
-
-
-def get_top_stock():
-    best_symbol, best_cap = None, -1
-
-    try:
-        query = EquityQuery(
-            "and",
-            [EquityQuery("gt", ["intradaymarketcap", 1]), EquityQuery("eq", ["region", "us"])],
-        )
-        res = yf.screen(query, sortField="intradaymarketcap", sortAsc=False, size=20)
-        for r in res["quotes"]:
-            cap = r.get("marketCap")
-            if cap and cap > best_cap:
-                best_cap = cap
-                best_symbol = r.get("symbol")
-    except Exception as e:
-        print(f"  warn: screener failed: {e}", file=sys.stderr)
-
-    for symbol in EXTRA_NON_US_TICKERS:
-        try:
-            info = yf.Ticker(symbol).fast_info
-            cap_usd = info["market_cap"] * _fx_to_usd(info["currency"])
-            if cap_usd > best_cap:
-                best_cap = cap_usd
-                best_symbol = symbol
-        except Exception as e:
-            print(f"  warn: couldn't fetch {symbol}: {e}", file=sys.stderr)
-
-    return {"class": "company", "leader": best_symbol, "value_usd": best_cap}
 
 
 def get_top_crypto():
@@ -161,7 +109,7 @@ def notify(title, message):
 
 
 def main():
-    results = [get_top_stock(), get_top_crypto(), get_top_metal()]
+    results = [get_top_crypto(), get_top_metal()]
     old_state = load_state()
     new_state = {}
 
