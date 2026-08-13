@@ -74,18 +74,46 @@ def get_top_crypto():
     }
 
 
+# A single-ticker price fetch that lands far outside this range is almost
+# certainly a bad/stale quote from the free yfinance endpoint, not a real
+# market move -- retry rather than let it flip the leader for one run.
+METAL_PLAUSIBLE_PRICE_USD = {
+    "Gold": (1000, 10000),
+    "Silver": (10, 200),
+    "Platinum": (300, 3000),
+    "Palladium": (300, 5000),
+}
+
+
+def _fetch_metal_price(name, ticker, attempts=3):
+    lo, hi = METAL_PLAUSIBLE_PRICE_USD[name]
+    last_err = None
+    for attempt in range(attempts):
+        try:
+            price = yf.Ticker(ticker).fast_info["last_price"]
+            if lo <= price <= hi:
+                return price
+            last_err = f"implausible price {price} (expected {lo}-{hi})"
+        except Exception as e:
+            last_err = str(e)
+        print(f"  warn: {ticker} fetch attempt {attempt + 1}/{attempts} failed: {last_err}", file=sys.stderr)
+        if attempt < attempts - 1:
+            time.sleep(5)
+    print(f"  warn: giving up on {ticker} after {attempts} attempts: {last_err}", file=sys.stderr)
+    return None
+
+
 def get_top_metal():
     best_name, best_value = None, -1
     for name, ticker in METAL_FUTURES_TICKERS.items():
-        try:
-            price = yf.Ticker(ticker).fast_info["last_price"]
-            supply_oz = METAL_SUPPLY_TONNES[name] * TROY_OZ_PER_TONNE
-            value = price * supply_oz
-            if value > best_value:
-                best_value = value
-                best_name = name
-        except Exception as e:
-            print(f"  warn: couldn't fetch {ticker}: {e}", file=sys.stderr)
+        price = _fetch_metal_price(name, ticker)
+        if price is None:
+            continue
+        supply_oz = METAL_SUPPLY_TONNES[name] * TROY_OZ_PER_TONNE
+        value = price * supply_oz
+        if value > best_value:
+            best_value = value
+            best_name = name
     return {"class": "metal", "leader": best_name, "value_usd": best_value}
 
 
