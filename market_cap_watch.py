@@ -42,36 +42,63 @@ METAL_FUTURES_TICKERS = {
 }
 
 
-def get_top_crypto():
-    last_err = None
-    attempts = 6
-    for attempt in range(attempts):
-        resp = requests.get(
-            "https://api.coingecko.com/api/v3/coins/markets",
-            params={
-                "vs_currency": "usd",
-                "order": "market_cap_desc",
-                "per_page": 1,
-                "page": 1,
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if data:
-            top = data[0]
-            break
-        last_err = f"empty response body: {resp.text[:200]!r}"
-        print(f"  warn: coingecko returned no data (attempt {attempt + 1}/{attempts}): {last_err}", file=sys.stderr)
-        time.sleep(10 * (attempt + 1))
-    else:
-        raise RuntimeError(f"coingecko returned no data after retries: {last_err}")
+HTTP_HEADERS = {"User-Agent": "assetsnotifaction/1.0 (+https://github.com/mhaney93/assetsnotifaction)"}
 
-    return {
-        "class": "crypto",
-        "leader": top["symbol"].upper(),
-        "value_usd": top["market_cap"],
-    }
+
+def _top_crypto_coinpaprika():
+    resp = requests.get(
+        "https://api.coinpaprika.com/v1/tickers",
+        params={"limit": 5},
+        headers=HTTP_HEADERS,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = [c for c in resp.json() if c.get("rank")]
+    if not data:
+        raise RuntimeError(f"empty response body: {resp.text[:200]!r}")
+    top = min(data, key=lambda c: c["rank"])
+    return top["symbol"].upper(), top["quotes"]["USD"]["market_cap"]
+
+
+def _top_crypto_coingecko():
+    resp = requests.get(
+        "https://api.coingecko.com/api/v3/coins/markets",
+        params={
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": 1,
+            "page": 1,
+        },
+        headers=HTTP_HEADERS,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if not data:
+        raise RuntimeError(f"empty response body: {resp.text[:200]!r}")
+    return data[0]["symbol"].upper(), data[0]["market_cap"]
+
+
+CRYPTO_SOURCES = [
+    ("coinpaprika", _top_crypto_coinpaprika),
+    ("coingecko", _top_crypto_coingecko),
+]
+
+
+def get_top_crypto(attempts=3):
+    last_err = None
+    for attempt in range(attempts):
+        for source, fetch in CRYPTO_SOURCES:
+            try:
+                leader, value = fetch()
+                return {"class": "crypto", "leader": leader, "value_usd": value}
+            except Exception as e:
+                last_err = f"{source}: {e}"
+                print(f"  warn: crypto fetch attempt {attempt + 1}/{attempts} failed: {last_err}", file=sys.stderr)
+        if attempt < attempts - 1:
+            time.sleep(10 * (attempt + 1))
+    print(f"  warn: giving up on crypto after {attempts} attempts: {last_err}", file=sys.stderr)
+    return {"class": "crypto", "leader": None, "value_usd": None}
 
 
 # A single-ticker price fetch that lands far outside this range is almost
@@ -139,18 +166,24 @@ def notify(title, message):
 def main():
     results = [get_top_crypto(), get_top_metal()]
     old_state = load_state()
-    new_state = {}
+    new_state = dict(old_state)
 
     for r in results:
         cls, leader = r["class"], r["leader"]
-        new_state[cls] = leader
         old_leader = old_state.get(cls)
 
+        if leader is None:
+            # Data source unavailable this run -- keep the previous leader
+            # rather than failing the job or wiping state.
+            print(f"{cls}: no data this run, keeping previous leader {old_leader}")
+            continue
+
+        new_state[cls] = leader
         print(f"{cls}: {leader} (${r['value_usd']:,.0f})")
 
         if old_leader is None:
             continue  # first run for this class, just establish baseline
-        if leader and leader != old_leader:
+        if leader != old_leader:
             notify(
                 f"New #1 {cls}!",
                 f"{old_leader} has been overthrown by {leader} "
