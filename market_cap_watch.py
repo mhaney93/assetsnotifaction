@@ -135,7 +135,7 @@ def get_top_metal():
     for name, ticker in METAL_FUTURES_TICKERS.items():
         price = _fetch_metal_price(name, ticker)
         if price is None:
-            continue
+            return {"class": "metal", "leader": None, "value_usd": None}
         supply_oz = METAL_SUPPLY_TONNES[name] * TROY_OZ_PER_TONNE
         value = price * supply_oz
         if value > best_value:
