@@ -105,7 +105,7 @@ def get_top_crypto(attempts=3):
 # certainly a bad/stale quote from the free yfinance endpoint, not a real
 # market move -- retry rather than let it flip the leader for one run.
 METAL_PLAUSIBLE_PRICE_USD = {
-    "Gold": (1000, 10000),
+    "Gold": (1000, 50000),
     "Silver": (10, 200),
     "Platinum": (300, 3000),
     "Palladium": (300, 5000),
